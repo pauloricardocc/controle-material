@@ -1,0 +1,16 @@
+# Node modules (caso futuro)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Database files (IndexedDB is browser-side, no local DB files)
+
+# Logs
+*.log

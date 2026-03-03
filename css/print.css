@@ -1,0 +1,116 @@
+/* ========================================
+   PRINT STYLES - Requisição A4
+   ======================================== */
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+
+    .print-area,
+    .print-area * {
+        visibility: visible;
+    }
+
+    .print-area {
+        display: block !important;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        padding: 20mm;
+        background: #fff;
+    }
+
+    .print-header {
+        text-align: center;
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+        border-bottom: 2px solid #333;
+    }
+
+    .print-header h1 {
+        font-size: 18pt;
+        font-weight: 700;
+        margin-bottom: 4px;
+        color: #000;
+        font-family: 'Inter', Arial, sans-serif;
+    }
+
+    .print-header p {
+        font-size: 10pt;
+        color: #555;
+    }
+
+    .print-info {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        font-size: 10pt;
+    }
+
+    .print-info-item {
+        margin-bottom: 6px;
+    }
+
+    .print-info-item strong {
+        display: inline-block;
+        min-width: 100px;
+    }
+
+    .print-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 30px;
+        font-size: 10pt;
+    }
+
+    .print-table th {
+        background: #f0f0f0 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        border: 1px solid #333;
+        padding: 8px 12px;
+        text-align: left;
+        font-weight: 600;
+    }
+
+    .print-table td {
+        border: 1px solid #333;
+        padding: 8px 12px;
+    }
+
+    .print-signatures {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 60px;
+        gap: 20px;
+    }
+
+    .print-signature-block {
+        flex: 1;
+        text-align: center;
+    }
+
+    .print-signature-line {
+        border-top: 1px solid #333;
+        margin-top: 60px;
+        padding-top: 8px;
+        font-size: 9pt;
+        color: #555;
+    }
+
+    .print-footer {
+        margin-top: 40px;
+        text-align: center;
+        font-size: 8pt;
+        color: #999;
+        border-top: 1px solid #ddd;
+        padding-top: 10px;
+    }
+
+    @page {
+        size: A4;
+        margin: 15mm;
+    }
+}
