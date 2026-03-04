@@ -3,13 +3,13 @@
  */
 
 const DashboardPage = {
-    async render() {
-        const content = document.getElementById('contentArea');
-        content.innerHTML = '<div class="spinner"></div>';
+  async render() {
+    const content = document.getElementById('contentArea');
+    content.innerHTML = '<div class="spinner"></div>';
 
-        try {
-            const data = await db.getDashboardData();
-            content.innerHTML = `
+    try {
+      const data = await db.getDashboardData();
+      content.innerHTML = `
         <div class="fade-in">
           <!-- Stats row -->
           <div class="stats-grid">
@@ -53,8 +53,8 @@ const DashboardPage = {
                 <div class="stat-label">${data.belowMinCount > 0 ? 'atenção necessária' : 'tudo OK'}</div>
               </div>
             </div>
-            <div class="stat-card orange">
-              <div class="stat-icon orange">
+            <div class="stat-card purple">
+              <div class="stat-icon purple">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/>
@@ -184,18 +184,18 @@ const DashboardPage = {
           </div>
         </div>
       `;
-        } catch (err) {
-            content.innerHTML = `<div class="empty-state"><h4>Erro ao carregar painel</h4><p>${err.message}</p></div>`;
-        }
-    },
+    } catch (err) {
+      content.innerHTML = `<div class="empty-state"><h4>Erro ao carregar painel</h4><p>${err.message}</p></div>`;
+    }
+  },
 
-    _renderCategoryBars(catMap) {
-        const entries = Object.entries(catMap).sort((a, b) => b[1] - a[1]);
-        const max = Math.max(...entries.map(e => e[1]), 1);
+  _renderCategoryBars(catMap) {
+    const entries = Object.entries(catMap).sort((a, b) => b[1] - a[1]);
+    const max = Math.max(...entries.map(e => e[1]), 1);
 
-        return entries.map(([cat, qty]) => {
-            const pct = Math.max((qty / max) * 100, 8);
-            return `
+    return entries.map(([cat, qty]) => {
+      const pct = Math.max((qty / max) * 100, 8);
+      return `
         <div class="chart-bar-row">
           <div class="chart-bar-label" title="${escapeHTML(cat)}">${escapeHTML(cat)}</div>
           <div class="chart-bar-track">
@@ -203,16 +203,16 @@ const DashboardPage = {
           </div>
         </div>
       `;
-        }).join('');
-    },
+    }).join('');
+  },
 
-    _renderDestBars(destMap) {
-        const entries = Object.entries(destMap).sort((a, b) => b[1] - a[1]);
-        const max = Math.max(...entries.map(e => e[1]), 1);
+  _renderDestBars(destMap) {
+    const entries = Object.entries(destMap).sort((a, b) => b[1] - a[1]);
+    const max = Math.max(...entries.map(e => e[1]), 1);
 
-        return entries.map(([dest, qty]) => {
-            const pct = Math.max((qty / max) * 100, 8);
-            return `
+    return entries.map(([dest, qty]) => {
+      const pct = Math.max((qty / max) * 100, 8);
+      return `
         <div class="chart-bar-row">
           <div class="chart-bar-label" title="${escapeHTML(dest)}">${escapeHTML(dest)}</div>
           <div class="chart-bar-track">
@@ -220,6 +220,6 @@ const DashboardPage = {
           </div>
         </div>
       `;
-        }).join('');
-    }
+    }).join('');
+  }
 };

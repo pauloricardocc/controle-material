@@ -156,6 +156,19 @@ class Database {
     return material;
   }
 
+  async deleteMaterial(id) {
+    const material = await this.get('materials', id);
+    if (!material) throw new Error('Material não encontrado');
+    // Delete related movements
+    const movements = await this.getAllByIndex('movements', 'materialId', id);
+    for (const mov of movements) {
+      await this.delete('movements', mov.id);
+    }
+    await this.delete('materials', id);
+    await this.addAuditLog('DELETE', 'material', id, `Material "${material.name}" (${material.code}) excluído`);
+    return material;
+  }
+
   async searchMaterials(query = '', category = '', status = '') {
     const all = await this.getAll('materials');
     return all.filter(m => {
@@ -329,6 +342,19 @@ class Database {
 
     await this.addAuditLog('STATUS', 'requisition', reqId,
       `Requisição ${req.number} alterada para "${newStatus}"`);
+  }
+
+  async deleteRequisition(reqId) {
+    const req = await this.get('requisitions', reqId);
+    if (!req) throw new Error('Requisição não encontrada');
+    // Delete related items
+    const items = await this.getAllByIndex('requisitionItems', 'requisitionId', reqId);
+    for (const item of items) {
+      await this.delete('requisitionItems', item.id);
+    }
+    await this.delete('requisitions', reqId);
+    await this.addAuditLog('DELETE', 'requisition', reqId, `Requisição "${req.number}" excluída`);
+    return req;
   }
 
   async getRequisitionWithItems(reqId) {

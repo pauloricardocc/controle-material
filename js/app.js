@@ -58,6 +58,14 @@ const App = {
             document.getElementById('sidebarOverlay').classList.remove('active');
         });
 
+        // Setup logout
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                Auth.logout();
+            });
+        }
+
         // Handle hash routing
         this._handleRoute();
         window.addEventListener('hashchange', () => this._handleRoute());
@@ -71,6 +79,7 @@ const App = {
             }
         });
     },
+
 
     _updateDate() {
         const dateEl = document.getElementById('currentDate');
@@ -142,4 +151,11 @@ const App = {
 };
 
 // Initialize app on DOM ready
-document.addEventListener('DOMContentLoaded', () => App.init());
+document.addEventListener('DOMContentLoaded', () => {
+    if (Auth.isAuthenticated()) {
+        Auth.showApp();
+        App.init();
+    } else {
+        Auth.renderLoginScreen();
+    }
+});

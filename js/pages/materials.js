@@ -124,6 +124,14 @@ const MaterialsPage = {
         : '<polyline points="20 6 9 17 4 12"/>'}
               </svg>
             </button>
+            <button class="btn btn-ghost btn-icon btn-delete" data-id="${m.id}" data-name="${escapeHTML(m.name)}" title="Excluir">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger-500)" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                <line x1="10" y1="11" x2="10" y2="17"/>
+                <line x1="14" y1="11" x2="14" y2="17"/>
+              </svg>
+            </button>
           </div>
         </td>
       </tr>
@@ -146,6 +154,22 @@ const MaterialsPage = {
         const mat = await db.toggleMaterialStatus(Number(btn.dataset.id));
         showToast(`Material "${mat.name}" ${mat.status === 'ativo' ? 'ativado' : 'inativado'}`);
         this._loadTable();
+      });
+    });
+
+    tbody.querySelectorAll('.btn-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.name;
+        const id = Number(btn.dataset.id);
+        if (confirm(`Tem certeza que deseja excluir o material "${name}"?\n\nEsta ação é irreversível e também removerá todas as movimentações de estoque deste material.`)) {
+          try {
+            await db.deleteMaterial(id);
+            showToast(`Material "${name}" excluído com sucesso!`);
+            this._loadTable();
+          } catch (err) {
+            showToast(err.message || 'Erro ao excluir material', 'error');
+          }
+        }
       });
     });
   },
