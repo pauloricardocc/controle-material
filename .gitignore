@@ -10,7 +10,8 @@ desktop.ini
 .vscode/
 .idea/
 
-# Database files (IndexedDB is browser-side, no local DB files)
+# Database files (server-side JSON)
+data/
 
 # Logs
 *.log

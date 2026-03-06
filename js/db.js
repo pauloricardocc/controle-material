@@ -1,133 +1,91 @@
 /**
- * IndexedDB Database Layer
- * Handles all data persistence for the Material Control System.
+ * Server-backed Database Layer
+ * All data is stored centrally on the server via REST API.
+ * Replaces previous IndexedDB implementation to allow data sharing across computers.
  */
 
-const DB_NAME = 'MaterialControlDB';
-const DB_VERSION = 2;
+const API_URL = '/api/data';
 
 class Database {
   constructor() {
-    this.db = null;
+    this._data = null;
+  }
+
+  // --- Core API methods ---
+
+  async _load() {
+    const res = await fetch(API_URL);
+    if (!res.ok) throw new Error('Erro ao carregar dados do servidor');
+    this._data = await res.json();
+    // Ensure all stores exist
+    const stores = ['materials', 'movements', 'requisitions', 'requisitionItems', 'auditLog', 'categories', 'units'];
+    for (const s of stores) {
+      if (!this._data[s]) this._data[s] = [];
+    }
+    if (!this._data._nextIds) this._data._nextIds = {};
+    for (const s of stores) {
+      if (!this._data._nextIds[s]) this._data._nextIds[s] = 1;
+    }
+  }
+
+  async _save() {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(this._data)
+    });
+    if (!res.ok) throw new Error('Erro ao salvar dados no servidor');
   }
 
   async init() {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-      request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-
-        // Materials store
-        if (!db.objectStoreNames.contains('materials')) {
-          const matStore = db.createObjectStore('materials', { keyPath: 'id', autoIncrement: true });
-          matStore.createIndex('name', 'name', { unique: false });
-          matStore.createIndex('code', 'code', { unique: true });
-          matStore.createIndex('category', 'category', { unique: false });
-          matStore.createIndex('status', 'status', { unique: false });
-        }
-
-        // Stock movements store
-        if (!db.objectStoreNames.contains('movements')) {
-          const movStore = db.createObjectStore('movements', { keyPath: 'id', autoIncrement: true });
-          movStore.createIndex('materialId', 'materialId', { unique: false });
-          movStore.createIndex('type', 'type', { unique: false });
-          movStore.createIndex('createdAt', 'createdAt', { unique: false });
-        }
-
-        // Requisitions store
-        if (!db.objectStoreNames.contains('requisitions')) {
-          const reqStore = db.createObjectStore('requisitions', { keyPath: 'id', autoIncrement: true });
-          reqStore.createIndex('status', 'status', { unique: false });
-          reqStore.createIndex('createdAt', 'createdAt', { unique: false });
-          reqStore.createIndex('number', 'number', { unique: true });
-        }
-
-        // Requisition items store
-        if (!db.objectStoreNames.contains('requisitionItems')) {
-          const riStore = db.createObjectStore('requisitionItems', { keyPath: 'id', autoIncrement: true });
-          riStore.createIndex('requisitionId', 'requisitionId', { unique: false });
-          riStore.createIndex('materialId', 'materialId', { unique: false });
-        }
-
-        // Audit log store
-        if (!db.objectStoreNames.contains('auditLog')) {
-          const logStore = db.createObjectStore('auditLog', { keyPath: 'id', autoIncrement: true });
-          logStore.createIndex('entity', 'entity', { unique: false });
-          logStore.createIndex('createdAt', 'createdAt', { unique: false });
-        }
-
-        // Categories store (v2)
-        if (!db.objectStoreNames.contains('categories')) {
-          const catStore = db.createObjectStore('categories', { keyPath: 'id', autoIncrement: true });
-          catStore.createIndex('name', 'name', { unique: true });
-        }
-
-        // Units store (v2)
-        if (!db.objectStoreNames.contains('units')) {
-          const unitStore = db.createObjectStore('units', { keyPath: 'id', autoIncrement: true });
-          unitStore.createIndex('name', 'name', { unique: true });
-        }
-      };
-
-      request.onsuccess = (event) => {
-        this.db = event.target.result;
-        resolve(this.db);
-      };
-
-      request.onerror = (event) => {
-        reject('Erro ao abrir banco de dados: ' + event.target.error);
-      };
-    });
+    await this._load();
   }
 
-  // Generic CRUD helpers
-  _transaction(storeName, mode = 'readonly') {
-    const tx = this.db.transaction(storeName, mode);
-    return tx.objectStore(storeName);
-  }
+  // --- Generic CRUD helpers (in-memory, mirrors old API) ---
 
-  _promisify(request) {
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+  _getNextId(storeName) {
+    const id = this._data._nextIds[storeName] || 1;
+    this._data._nextIds[storeName] = id + 1;
+    return id;
   }
 
   async add(storeName, data) {
-    const store = this._transaction(storeName, 'readwrite');
-    return this._promisify(store.add(data));
+    const id = this._getNextId(storeName);
+    data.id = id;
+    this._data[storeName].push(data);
+    await this._save();
+    return id;
   }
 
   async put(storeName, data) {
-    const store = this._transaction(storeName, 'readwrite');
-    return this._promisify(store.put(data));
+    const idx = this._data[storeName].findIndex(item => item.id === data.id);
+    if (idx >= 0) {
+      this._data[storeName][idx] = data;
+    } else {
+      this._data[storeName].push(data);
+    }
+    await this._save();
   }
 
   async get(storeName, id) {
-    const store = this._transaction(storeName, 'readonly');
-    return this._promisify(store.get(id));
+    return this._data[storeName].find(item => item.id === id) || null;
   }
 
   async getAll(storeName) {
-    const store = this._transaction(storeName, 'readonly');
-    return this._promisify(store.getAll());
+    return [...this._data[storeName]];
   }
 
   async delete(storeName, id) {
-    const store = this._transaction(storeName, 'readwrite');
-    return this._promisify(store.delete(id));
+    this._data[storeName] = this._data[storeName].filter(item => item.id !== id);
+    await this._save();
   }
 
   async getAllByIndex(storeName, indexName, value) {
-    const store = this._transaction(storeName, 'readonly');
-    const index = store.index(indexName);
-    return this._promisify(index.getAll(value));
+    return this._data[storeName].filter(item => item[indexName] === value);
   }
 
   async count(storeName) {
-    const store = this._transaction(storeName, 'readonly');
-    return this._promisify(store.count());
+    return this._data[storeName].length;
   }
 
   // --- Material-specific methods ---
