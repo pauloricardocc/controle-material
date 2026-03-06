@@ -1,189 +1,189 @@
 /**
- * Server-backed Database Layer
- * All data is stored centrally on the server via REST API.
- * Replaces previous IndexedDB implementation to allow data sharing across computers.
+ * Supabase Database Layer
+ * All data is stored in Supabase PostgreSQL cloud database.
+ * Enables data sharing across all computers and works on Vercel.
  */
 
-const API_URL = '/api/data';
+const SUPABASE_URL = 'https://npqbtnsgeakivadhoxxg.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wcWJ0bnNnZWFraXZhZGhveHhnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3ODI2MzEsImV4cCI6MjA4ODM1ODYzMX0.EGuKvpNtliyFH5uURc0v50A4SC6kkYdttP0_5jVU0Eg';
 
 class Database {
   constructor() {
-    this._data = null;
-  }
-
-  // --- Core API methods ---
-
-  async _load() {
-    const res = await fetch(API_URL);
-    if (!res.ok) throw new Error('Erro ao carregar dados do servidor');
-    this._data = await res.json();
-    // Ensure all stores exist
-    const stores = ['materials', 'movements', 'requisitions', 'requisitionItems', 'auditLog', 'categories', 'units'];
-    for (const s of stores) {
-      if (!this._data[s]) this._data[s] = [];
-    }
-    if (!this._data._nextIds) this._data._nextIds = {};
-    for (const s of stores) {
-      if (!this._data._nextIds[s]) this._data._nextIds[s] = 1;
-    }
-  }
-
-  async _save() {
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(this._data)
-    });
-    if (!res.ok) throw new Error('Erro ao salvar dados no servidor');
+    this.supabase = null;
   }
 
   async init() {
-    await this._load();
+    this.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
 
-  // --- Generic CRUD helpers (in-memory, mirrors old API) ---
-
-  _getNextId(storeName) {
-    const id = this._data._nextIds[storeName] || 1;
-    this._data._nextIds[storeName] = id + 1;
-    return id;
+  // --- Helper: convert DB row keys (snake_case) to JS keys (camelCase) ---
+  _toJS(row) {
+    if (!row) return null;
+    const obj = { ...row };
+    if ('material_id' in obj) { obj.materialId = obj.material_id; delete obj.material_id; }
+    if ('min_stock' in obj) { obj.minStock = obj.min_stock; delete obj.min_stock; }
+    if ('created_at' in obj) { obj.createdAt = obj.created_at; delete obj.created_at; }
+    if ('updated_at' in obj) { obj.updatedAt = obj.updated_at; delete obj.updated_at; }
+    if ('requisition_id' in obj) { obj.requisitionId = obj.requisition_id; delete obj.requisition_id; }
+    if ('entity_id' in obj) { obj.entityId = obj.entity_id; delete obj.entity_id; }
+    return obj;
   }
 
-  async add(storeName, data) {
-    const id = this._getNextId(storeName);
-    data.id = id;
-    this._data[storeName].push(data);
-    await this._save();
-    return id;
+  // Convert JS keys (camelCase) to DB keys (snake_case)
+  _toDB(obj) {
+    if (!obj) return null;
+    const row = { ...obj };
+    if ('materialId' in row) { row.material_id = row.materialId; delete row.materialId; }
+    if ('minStock' in row) { row.min_stock = row.minStock; delete row.minStock; }
+    if ('createdAt' in row) { row.created_at = row.createdAt; delete row.createdAt; }
+    if ('updatedAt' in row) { row.updated_at = row.updatedAt; delete row.updatedAt; }
+    if ('requisitionId' in row) { row.requisition_id = row.requisitionId; delete row.requisitionId; }
+    if ('entityId' in row) { row.entity_id = row.entityId; delete row.entityId; }
+    return row;
   }
 
-  async put(storeName, data) {
-    const idx = this._data[storeName].findIndex(item => item.id === data.id);
-    if (idx >= 0) {
-      this._data[storeName][idx] = data;
-    } else {
-      this._data[storeName].push(data);
-    }
-    await this._save();
-  }
-
-  async get(storeName, id) {
-    return this._data[storeName].find(item => item.id === id) || null;
-  }
-
-  async getAll(storeName) {
-    return [...this._data[storeName]];
-  }
-
-  async delete(storeName, id) {
-    this._data[storeName] = this._data[storeName].filter(item => item.id !== id);
-    await this._save();
-  }
-
-  async getAllByIndex(storeName, indexName, value) {
-    return this._data[storeName].filter(item => item[indexName] === value);
-  }
-
-  async count(storeName) {
-    return this._data[storeName].length;
+  _toJSArray(rows) {
+    return (rows || []).map(r => this._toJS(r));
   }
 
   // --- Material-specific methods ---
 
   async addMaterial(material) {
-    material.createdAt = new Date().toISOString();
-    material.updatedAt = new Date().toISOString();
-    material.status = material.status || 'ativo';
-    const id = await this.add('materials', material);
+    const row = {
+      name: material.name,
+      code: material.code,
+      category: material.category || '',
+      unit: material.unit || 'un',
+      min_stock: material.minStock || 0,
+      location: material.location || '',
+      notes: material.notes || '',
+      status: material.status || 'ativo'
+    };
+    const { data, error } = await this.supabase.from('materials').insert(row).select().single();
+    if (error) throw new Error(error.message);
+    const id = data.id;
     await this.addAuditLog('CREATE', 'material', id, `Material "${material.name}" criado`);
     return id;
   }
 
   async updateMaterial(material) {
-    material.updatedAt = new Date().toISOString();
-    await this.put('materials', material);
+    const row = {
+      name: material.name,
+      code: material.code,
+      category: material.category || '',
+      unit: material.unit || 'un',
+      min_stock: material.minStock || 0,
+      location: material.location || '',
+      notes: material.notes || '',
+      status: material.status || 'ativo',
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await this.supabase.from('materials').update(row).eq('id', material.id);
+    if (error) throw new Error(error.message);
     await this.addAuditLog('UPDATE', 'material', material.id, `Material "${material.name}" atualizado`);
   }
 
   async toggleMaterialStatus(id) {
-    const material = await this.get('materials', id);
-    material.status = material.status === 'ativo' ? 'inativo' : 'ativo';
-    material.updatedAt = new Date().toISOString();
-    await this.put('materials', material);
-    await this.addAuditLog('STATUS', 'material', id, `Material "${material.name}" alterado para ${material.status}`);
-    return material;
+    const material = await this._getMaterial(id);
+    const newStatus = material.status === 'ativo' ? 'inativo' : 'ativo';
+    const { error } = await this.supabase.from('materials').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw new Error(error.message);
+    material.status = newStatus;
+    await this.addAuditLog('STATUS', 'material', id, `Material "${material.name}" alterado para ${newStatus}`);
+    return this._toJS(material);
+  }
+
+  async _getMaterial(id) {
+    const { data, error } = await this.supabase.from('materials').select('*').eq('id', id).single();
+    if (error) throw new Error(error.message);
+    return data;
   }
 
   async deleteMaterial(id) {
-    const material = await this.get('materials', id);
+    const material = await this._getMaterial(id);
     if (!material) throw new Error('Material não encontrado');
-    // Delete related movements
-    const movements = await this.getAllByIndex('movements', 'materialId', id);
-    for (const mov of movements) {
-      await this.delete('movements', mov.id);
-    }
-    await this.delete('materials', id);
+    // movements are deleted by CASCADE
+    const { error } = await this.supabase.from('materials').delete().eq('id', id);
+    if (error) throw new Error(error.message);
     await this.addAuditLog('DELETE', 'material', id, `Material "${material.name}" (${material.code}) excluído`);
-    return material;
+    return this._toJS(material);
   }
 
   async searchMaterials(query = '', category = '', status = '') {
-    const all = await this.getAll('materials');
-    return all.filter(m => {
-      const matchQuery = !query ||
-        m.name.toLowerCase().includes(query.toLowerCase()) ||
-        m.code.toLowerCase().includes(query.toLowerCase());
-      const matchCategory = !category || m.category === category;
-      const matchStatus = !status || m.status === status;
-      return matchQuery && matchCategory && matchStatus;
-    });
+    let q = this.supabase.from('materials').select('*');
+    if (status) q = q.eq('status', status);
+    if (category) q = q.eq('category', category);
+    const { data, error } = await q.order('name');
+    if (error) throw new Error(error.message);
+    let results = this._toJSArray(data);
+    if (query) {
+      const lower = query.toLowerCase();
+      results = results.filter(m =>
+        m.name.toLowerCase().includes(lower) ||
+        m.code.toLowerCase().includes(lower)
+      );
+    }
+    return results;
   }
 
   async getCategories() {
-    const all = await this.getAll('materials');
-    const cats = [...new Set(all.map(m => m.category).filter(Boolean))];
+    const { data, error } = await this.supabase.from('materials').select('category').neq('category', '');
+    if (error) throw new Error(error.message);
+    const cats = [...new Set(data.map(d => d.category).filter(Boolean))];
     return cats.sort();
   }
 
   // --- Stock movement methods ---
 
   async getStockBalance(materialId) {
-    const movements = await this.getAllByIndex('movements', 'materialId', materialId);
+    const { data, error } = await this.supabase.from('movements').select('type, quantity').eq('material_id', materialId);
+    if (error) throw new Error(error.message);
     let balance = 0;
-    for (const m of movements) {
-      if (m.type === 'entrada') balance += m.quantity;
-      else if (m.type === 'saida') balance -= m.quantity;
+    for (const m of data) {
+      if (m.type === 'entrada') balance += Number(m.quantity);
+      else if (m.type === 'saida') balance -= Number(m.quantity);
     }
     return balance;
   }
 
   async getAllBalances() {
-    const materials = await this.getAll('materials');
-    const result = [];
-    for (const mat of materials) {
-      const balance = await this.getStockBalance(mat.id);
-      result.push({
-        ...mat,
-        balance,
-        belowMin: balance < (mat.minStock || 0)
-      });
+    const { data: materials, error } = await this.supabase.from('materials').select('*');
+    if (error) throw new Error(error.message);
+    const { data: movements, error: err2 } = await this.supabase.from('movements').select('material_id, type, quantity');
+    if (err2) throw new Error(err2.message);
+
+    // Pre-compute balances
+    const balanceMap = {};
+    for (const m of movements) {
+      if (!balanceMap[m.material_id]) balanceMap[m.material_id] = 0;
+      if (m.type === 'entrada') balanceMap[m.material_id] += Number(m.quantity);
+      else if (m.type === 'saida') balanceMap[m.material_id] -= Number(m.quantity);
     }
-    return result;
+
+    return materials.map(mat => {
+      const jsMat = this._toJS(mat);
+      const balance = balanceMap[mat.id] || 0;
+      return {
+        ...jsMat,
+        balance,
+        belowMin: balance < (jsMat.minStock || 0)
+      };
+    });
   }
 
   async addStockEntry(materialId, quantity, notes = '') {
-    const movement = {
-      materialId,
+    const row = {
+      material_id: materialId,
       type: 'entrada',
       quantity: Number(quantity),
-      notes,
-      createdAt: new Date().toISOString()
+      notes
     };
-    const id = await this.add('movements', movement);
-    const material = await this.get('materials', materialId);
-    await this.addAuditLog('STOCK_ENTRY', 'movement', id,
+    const { data, error } = await this.supabase.from('movements').insert(row).select().single();
+    if (error) throw new Error(error.message);
+    const material = await this._getMaterial(materialId);
+    await this.addAuditLog('STOCK_ENTRY', 'movement', data.id,
       `Entrada de ${quantity} ${material?.unit || 'un'} - ${material?.name || 'ID:' + materialId}`);
-    return id;
+    return data.id;
   }
 
   async addStockExit(materialId, quantity, notes = '') {
@@ -191,40 +191,44 @@ class Database {
     if (balance < quantity) {
       throw new Error(`Saldo insuficiente. Disponível: ${balance}`);
     }
-    const movement = {
-      materialId,
+    const row = {
+      material_id: materialId,
       type: 'saida',
       quantity: Number(quantity),
-      notes,
-      createdAt: new Date().toISOString()
+      notes
     };
-    const id = await this.add('movements', movement);
-    const material = await this.get('materials', materialId);
-    await this.addAuditLog('STOCK_EXIT', 'movement', id,
+    const { data, error } = await this.supabase.from('movements').insert(row).select().single();
+    if (error) throw new Error(error.message);
+    const material = await this._getMaterial(materialId);
+    await this.addAuditLog('STOCK_EXIT', 'movement', data.id,
       `Saída de ${quantity} ${material?.unit || 'un'} - ${material?.name || 'ID:' + materialId}`);
-    return id;
+    return data.id;
   }
 
   async getRecentMovements(limit = 10) {
-    const all = await this.getAll('movements');
-    all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    const result = [];
-    for (const mov of all.slice(0, limit)) {
-      const material = await this.get('materials', mov.materialId);
-      result.push({
-        ...mov,
-        materialName: material?.name || 'Material removido',
-        materialCode: material?.code || '-',
-        materialUnit: material?.unit || 'un'
-      });
-    }
-    return result;
+    const { data, error } = await this.supabase
+      .from('movements')
+      .select('*, materials(name, code, unit)')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message);
+    return data.map(mov => ({
+      ...this._toJS(mov),
+      materialName: mov.materials?.name || 'Material removido',
+      materialCode: mov.materials?.code || '-',
+      materialUnit: mov.materials?.unit || 'un',
+      materials: undefined
+    }));
   }
 
   async getMovementsByMaterial(materialId) {
-    const movements = await this.getAllByIndex('movements', 'materialId', materialId);
-    movements.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    return movements;
+    const { data, error } = await this.supabase
+      .from('movements')
+      .select('*')
+      .eq('material_id', materialId)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return this._toJSArray(data);
   }
 
   async getBelowMinimum() {
@@ -235,14 +239,12 @@ class Database {
   // --- Requisition methods ---
 
   async getNextRequisitionNumber() {
-    const all = await this.getAll('requisitions');
-    if (all.length === 0) return 'REQ-0001';
-    const numbers = all.map(r => {
-      const match = r.number.match(/REQ-(\d+)/);
-      return match ? parseInt(match[1]) : 0;
-    });
-    const max = Math.max(...numbers);
-    return `REQ-${String(max + 1).padStart(4, '0')}`;
+    const { data, error } = await this.supabase.from('requisitions').select('number').order('id', { ascending: false }).limit(1);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return 'REQ-0001';
+    const match = data[0].number.match(/REQ-(\d+)/);
+    const num = match ? parseInt(match[1]) + 1 : 1;
+    return `REQ-${String(num).padStart(4, '0')}`;
   }
 
   async createRequisition(destination, notes, items) {
@@ -251,100 +253,100 @@ class Database {
     // Validate stock for all items
     for (const item of items) {
       const balance = await this.getStockBalance(item.materialId);
-      const material = await this.get('materials', item.materialId);
+      const material = await this._getMaterial(item.materialId);
       if (balance < item.quantity) {
         throw new Error(`Saldo insuficiente para "${material?.name}". Disponível: ${balance}`);
       }
     }
 
-    const requisition = {
+    const { data: req, error } = await this.supabase.from('requisitions').insert({
       number,
       destination,
       notes,
-      status: 'pendente',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+      status: 'pendente'
+    }).select().single();
+    if (error) throw new Error(error.message);
 
-    const reqId = await this.add('requisitions', requisition);
+    const reqItems = items.map(item => ({
+      requisition_id: req.id,
+      material_id: item.materialId,
+      quantity: Number(item.quantity)
+    }));
+    const { error: err2 } = await this.supabase.from('requisition_items').insert(reqItems);
+    if (err2) throw new Error(err2.message);
 
-    for (const item of items) {
-      await this.add('requisitionItems', {
-        requisitionId: reqId,
-        materialId: item.materialId,
-        quantity: Number(item.quantity)
-      });
-    }
-
-    await this.addAuditLog('CREATE', 'requisition', reqId,
+    await this.addAuditLog('CREATE', 'requisition', req.id,
       `Requisição ${number} criada para "${destination}" com ${items.length} itens`);
 
-    return reqId;
+    return req.id;
   }
 
   async updateRequisitionStatus(reqId, newStatus) {
-    const req = await this.get('requisitions', reqId);
-    if (!req) throw new Error('Requisição não encontrada');
+    const { data: req, error: err1 } = await this.supabase.from('requisitions').select('*').eq('id', reqId).single();
+    if (err1) throw new Error('Requisição não encontrada');
 
     if (newStatus === 'entregue' && req.status !== 'entregue') {
-      // Deduct stock
-      const items = await this.getAllByIndex('requisitionItems', 'requisitionId', reqId);
+      const { data: items } = await this.supabase.from('requisition_items').select('*').eq('requisition_id', reqId);
       for (const item of items) {
-        await this.addStockExit(item.materialId, item.quantity, `Req. ${req.number} - entrega`);
+        await this.addStockExit(item.material_id, item.quantity, `Req. ${req.number} - entrega`);
       }
     }
 
-    req.status = newStatus;
-    req.updatedAt = new Date().toISOString();
-    await this.put('requisitions', req);
+    const { error } = await this.supabase.from('requisitions').update({
+      status: newStatus,
+      updated_at: new Date().toISOString()
+    }).eq('id', reqId);
+    if (error) throw new Error(error.message);
 
     await this.addAuditLog('STATUS', 'requisition', reqId,
       `Requisição ${req.number} alterada para "${newStatus}"`);
   }
 
   async deleteRequisition(reqId) {
-    const req = await this.get('requisitions', reqId);
-    if (!req) throw new Error('Requisição não encontrada');
-    // Delete related items
-    const items = await this.getAllByIndex('requisitionItems', 'requisitionId', reqId);
-    for (const item of items) {
-      await this.delete('requisitionItems', item.id);
-    }
-    await this.delete('requisitions', reqId);
+    const { data: req, error: err1 } = await this.supabase.from('requisitions').select('*').eq('id', reqId).single();
+    if (err1) throw new Error('Requisição não encontrada');
+    // requisition_items are deleted by CASCADE
+    const { error } = await this.supabase.from('requisitions').delete().eq('id', reqId);
+    if (error) throw new Error(error.message);
     await this.addAuditLog('DELETE', 'requisition', reqId, `Requisição "${req.number}" excluída`);
-    return req;
+    return this._toJS(req);
   }
 
   async getRequisitionWithItems(reqId) {
-    const req = await this.get('requisitions', reqId);
-    if (!req) return null;
+    const { data: req, error } = await this.supabase.from('requisitions').select('*').eq('id', reqId).single();
+    if (error || !req) return null;
 
-    const rawItems = await this.getAllByIndex('requisitionItems', 'requisitionId', reqId);
-    const items = [];
-    for (const ri of rawItems) {
-      const material = await this.get('materials', ri.materialId);
-      items.push({
-        ...ri,
-        materialName: material?.name || 'Material removido',
-        materialCode: material?.code || '-',
-        materialUnit: material?.unit || 'un'
-      });
-    }
+    const { data: rawItems } = await this.supabase
+      .from('requisition_items')
+      .select('*, materials(name, code, unit)')
+      .eq('requisition_id', reqId);
 
-    return { ...req, items };
+    const items = (rawItems || []).map(ri => ({
+      ...this._toJS(ri),
+      materialName: ri.materials?.name || 'Material removido',
+      materialCode: ri.materials?.code || '-',
+      materialUnit: ri.materials?.unit || 'un',
+      materials: undefined
+    }));
+
+    return { ...this._toJS(req), items };
   }
 
   async getRecentRequisitions(limit = 10) {
-    const all = await this.getAll('requisitions');
-    all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    return all.slice(0, limit);
+    const { data, error } = await this.supabase
+      .from('requisitions')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message);
+    return this._toJSArray(data);
   }
 
   // --- Dashboard data ---
 
   async getDashboardData() {
-    const materials = await this.getAll('materials');
-    const activeCount = materials.filter(m => m.status === 'ativo').length;
+    const { data: materials } = await this.supabase.from('materials').select('*');
+    const activeCount = (materials || []).filter(m => m.status === 'ativo').length;
     const balances = await this.getAllBalances();
     const belowMin = balances.filter(b => b.status === 'ativo' && b.belowMin);
     const movements = await this.getRecentMovements(8);
@@ -360,13 +362,13 @@ class Database {
     }
 
     // Consumption by destination
-    const allReqs = await this.getAll('requisitions');
-    const deliveredReqs = allReqs.filter(r => r.status === 'entregue');
+    const { data: allReqs } = await this.supabase.from('requisitions').select('*');
+    const deliveredReqs = (allReqs || []).filter(r => r.status === 'entregue');
     const destMap = {};
     for (const req of deliveredReqs) {
-      const items = await this.getAllByIndex('requisitionItems', 'requisitionId', req.id);
+      const { data: items } = await this.supabase.from('requisition_items').select('quantity').eq('requisition_id', req.id);
       let totalQty = 0;
-      for (const it of items) totalQty += it.quantity;
+      for (const it of (items || [])) totalQty += Number(it.quantity);
       const dest = req.destination || 'Sem destino';
       if (!destMap[dest]) destMap[dest] = 0;
       destMap[dest] += totalQty;
@@ -376,7 +378,7 @@ class Database {
       .filter(b => b.status === 'ativo')
       .reduce((sum, b) => sum + b.balance, 0);
 
-    const pendingReqs = allReqs.filter(r => r.status === 'pendente').length;
+    const pendingReqs = (allReqs || []).filter(r => r.status === 'pendente').length;
 
     return {
       totalMaterials: activeCount,
@@ -394,19 +396,24 @@ class Database {
   // --- Audit log ---
 
   async addAuditLog(action, entity, entityId, details) {
-    return this.add('auditLog', {
+    const { error } = await this.supabase.from('audit_log').insert({
       action,
       entity,
-      entityId,
-      details,
-      createdAt: new Date().toISOString()
+      entity_id: entityId,
+      details
     });
+    // Don't throw on audit log errors to avoid breaking main operations
+    if (error) console.warn('Audit log error:', error.message);
   }
 
   async getAuditLog(limit = 50) {
-    const all = await this.getAll('auditLog');
-    all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    return all.slice(0, limit);
+    const { data, error } = await this.supabase
+      .from('audit_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message);
+    return this._toJSArray(data);
   }
 
   // --- Category methods ---
@@ -414,31 +421,31 @@ class Database {
   async addCategory(name) {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Nome da categoria é obrigatório');
-    const id = await this.add('categories', { name: trimmed, createdAt: new Date().toISOString() });
-    await this.addAuditLog('CREATE', 'category', id, `Categoria "${trimmed}" criada`);
-    return id;
+    const { data, error } = await this.supabase.from('categories').insert({ name: trimmed }).select().single();
+    if (error) throw new Error(error.message);
+    await this.addAuditLog('CREATE', 'category', data.id, `Categoria "${trimmed}" criada`);
+    return data.id;
   }
 
   async updateCategory(id, name) {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Nome da categoria é obrigatório');
-    const cat = await this.get('categories', id);
-    if (!cat) throw new Error('Categoria não encontrada');
-    cat.name = trimmed;
-    cat.updatedAt = new Date().toISOString();
-    await this.put('categories', cat);
+    const { error } = await this.supabase.from('categories').update({ name: trimmed, updated_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw new Error(error.message);
     await this.addAuditLog('UPDATE', 'category', id, `Categoria atualizada para "${trimmed}"`);
   }
 
   async deleteCategory(id) {
-    const cat = await this.get('categories', id);
-    await this.delete('categories', id);
+    const { data: cat } = await this.supabase.from('categories').select('name').eq('id', id).single();
+    const { error } = await this.supabase.from('categories').delete().eq('id', id);
+    if (error) throw new Error(error.message);
     await this.addAuditLog('DELETE', 'category', id, `Categoria "${cat?.name}" removida`);
   }
 
   async getAllCategories() {
-    const dbCats = await this.getAll('categories');
-    return dbCats.sort((a, b) => a.name.localeCompare(b.name));
+    const { data, error } = await this.supabase.from('categories').select('*').order('name');
+    if (error) throw new Error(error.message);
+    return this._toJSArray(data);
   }
 
   async getCategoryNames() {
@@ -451,33 +458,38 @@ class Database {
   async addUnit(name, abbreviation = '') {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Nome da unidade é obrigatório');
-    const data = { name: trimmed, abbreviation: abbreviation.trim(), createdAt: new Date().toISOString() };
-    const id = await this.add('units', data);
-    await this.addAuditLog('CREATE', 'unit', id, `Unidade "${trimmed}" criada`);
-    return id;
+    const { data, error } = await this.supabase.from('units').insert({
+      name: trimmed,
+      abbreviation: abbreviation.trim()
+    }).select().single();
+    if (error) throw new Error(error.message);
+    await this.addAuditLog('CREATE', 'unit', data.id, `Unidade "${trimmed}" criada`);
+    return data.id;
   }
 
   async updateUnit(id, name, abbreviation = '') {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Nome da unidade é obrigatório');
-    const unit = await this.get('units', id);
-    if (!unit) throw new Error('Unidade não encontrada');
-    unit.name = trimmed;
-    unit.abbreviation = abbreviation.trim();
-    unit.updatedAt = new Date().toISOString();
-    await this.put('units', unit);
+    const { error } = await this.supabase.from('units').update({
+      name: trimmed,
+      abbreviation: abbreviation.trim(),
+      updated_at: new Date().toISOString()
+    }).eq('id', id);
+    if (error) throw new Error(error.message);
     await this.addAuditLog('UPDATE', 'unit', id, `Unidade atualizada para "${trimmed}"`);
   }
 
   async deleteUnit(id) {
-    const unit = await this.get('units', id);
-    await this.delete('units', id);
+    const { data: unit } = await this.supabase.from('units').select('name').eq('id', id).single();
+    const { error } = await this.supabase.from('units').delete().eq('id', id);
+    if (error) throw new Error(error.message);
     await this.addAuditLog('DELETE', 'unit', id, `Unidade "${unit?.name}" removida`);
   }
 
   async getAllUnits() {
-    const dbUnits = await this.getAll('units');
-    return dbUnits.sort((a, b) => a.name.localeCompare(b.name));
+    const { data, error } = await this.supabase.from('units').select('*').order('name');
+    if (error) throw new Error(error.message);
+    return this._toJSArray(data);
   }
 
   async getUnitNames() {
@@ -485,25 +497,10 @@ class Database {
     return units.map(u => u.name);
   }
 
-  // --- Seed defaults (run once) ---
-
+  // --- Seed defaults (no-op, already done via SQL) ---
   async seedDefaults() {
-    const cats = await this.getAll('categories');
-    const units = await this.getAll('units');
-
-    if (cats.length === 0) {
-      const defaults = ['Elétrica', 'Hidráulica', 'Pintura', 'Ferragens', 'Cimento e Argamassa', 'Madeira', 'Ferramentas', 'EPI', 'Acabamento', 'Tubulação', 'Impermeabilização', 'Diversos'];
-      for (const name of defaults) {
-        await this.add('categories', { name, createdAt: new Date().toISOString() });
-      }
-    }
-
-    if (units.length === 0) {
-      const defaults = ['Unidade', 'Peça', 'Metro', 'Metro²', 'Metro³', 'Litro', 'Kg', 'Tonelada', 'Caixa', 'Pacote', 'Rolo', 'Saco', 'Barra', 'Galão', 'Lata', 'Balde', 'Tubo', 'Folha', 'Par', 'Conjunto'];
-      for (const name of defaults) {
-        await this.add('units', { name, createdAt: new Date().toISOString() });
-      }
-    }
+    // Categories and units are seeded via SQL setup.
+    // This method is kept for compatibility.
   }
 }
 
