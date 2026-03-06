@@ -140,7 +140,7 @@ const MaterialsPage = {
     // Bind actions
     tbody.querySelectorAll('.btn-edit').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const mat = await db.get('materials', Number(btn.dataset.id));
+        const mat = await db.getMaterial(Number(btn.dataset.id));
         const catNames2 = await db.getCategoryNames();
         const legacyCats2 = await db.getCategories();
         const allCats = [...new Set([...catNames2, ...legacyCats2])].sort();

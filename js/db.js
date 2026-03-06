@@ -62,7 +62,7 @@ class Database {
     const { data, error } = await this.supabase.from('materials').insert(row).select().single();
     if (error) throw new Error(error.message);
     const id = data.id;
-    await this.addAuditLog('CREATE', 'material', id, `Material "${material.name}" criado`);
+    this.addAuditLog('CREATE', 'material', id, `Material "${material.name}" criado`);
     return id;
   }
 
@@ -80,7 +80,7 @@ class Database {
     };
     const { error } = await this.supabase.from('materials').update(row).eq('id', material.id);
     if (error) throw new Error(error.message);
-    await this.addAuditLog('UPDATE', 'material', material.id, `Material "${material.name}" atualizado`);
+    this.addAuditLog('UPDATE', 'material', material.id, `Material "${material.name}" atualizado`);
   }
 
   async toggleMaterialStatus(id) {
@@ -89,7 +89,7 @@ class Database {
     const { error } = await this.supabase.from('materials').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) throw new Error(error.message);
     material.status = newStatus;
-    await this.addAuditLog('STATUS', 'material', id, `Material "${material.name}" alterado para ${newStatus}`);
+    this.addAuditLog('STATUS', 'material', id, `Material "${material.name}" alterado para ${newStatus}`);
     return this._toJS(material);
   }
 
@@ -99,13 +99,24 @@ class Database {
     return data;
   }
 
+  async getMaterial(id) {
+    const row = await this._getMaterial(id);
+    return this._toJS(row);
+  }
+
+  async getActiveMaterials() {
+    const { data, error } = await this.supabase.from('materials').select('*').eq('status', 'ativo').order('name');
+    if (error) throw new Error(error.message);
+    return this._toJSArray(data);
+  }
+
   async deleteMaterial(id) {
     const material = await this._getMaterial(id);
     if (!material) throw new Error('Material não encontrado');
     // movements are deleted by CASCADE
     const { error } = await this.supabase.from('materials').delete().eq('id', id);
     if (error) throw new Error(error.message);
-    await this.addAuditLog('DELETE', 'material', id, `Material "${material.name}" (${material.code}) excluído`);
+    this.addAuditLog('DELETE', 'material', id, `Material "${material.name}" (${material.code}) excluído`);
     return this._toJS(material);
   }
 
@@ -181,7 +192,7 @@ class Database {
     const { data, error } = await this.supabase.from('movements').insert(row).select().single();
     if (error) throw new Error(error.message);
     const material = await this._getMaterial(materialId);
-    await this.addAuditLog('STOCK_ENTRY', 'movement', data.id,
+    this.addAuditLog('STOCK_ENTRY', 'movement', data.id,
       `Entrada de ${quantity} ${material?.unit || 'un'} - ${material?.name || 'ID:' + materialId}`);
     return data.id;
   }
@@ -200,7 +211,7 @@ class Database {
     const { data, error } = await this.supabase.from('movements').insert(row).select().single();
     if (error) throw new Error(error.message);
     const material = await this._getMaterial(materialId);
-    await this.addAuditLog('STOCK_EXIT', 'movement', data.id,
+    this.addAuditLog('STOCK_EXIT', 'movement', data.id,
       `Saída de ${quantity} ${material?.unit || 'un'} - ${material?.name || 'ID:' + materialId}`);
     return data.id;
   }
@@ -275,7 +286,7 @@ class Database {
     const { error: err2 } = await this.supabase.from('requisition_items').insert(reqItems);
     if (err2) throw new Error(err2.message);
 
-    await this.addAuditLog('CREATE', 'requisition', req.id,
+    this.addAuditLog('CREATE', 'requisition', req.id,
       `Requisição ${number} criada para "${destination}" com ${items.length} itens`);
 
     return req.id;
@@ -298,7 +309,7 @@ class Database {
     }).eq('id', reqId);
     if (error) throw new Error(error.message);
 
-    await this.addAuditLog('STATUS', 'requisition', reqId,
+    this.addAuditLog('STATUS', 'requisition', reqId,
       `Requisição ${req.number} alterada para "${newStatus}"`);
   }
 
@@ -308,7 +319,7 @@ class Database {
     // requisition_items are deleted by CASCADE
     const { error } = await this.supabase.from('requisitions').delete().eq('id', reqId);
     if (error) throw new Error(error.message);
-    await this.addAuditLog('DELETE', 'requisition', reqId, `Requisição "${req.number}" excluída`);
+    this.addAuditLog('DELETE', 'requisition', reqId, `Requisição "${req.number}" excluída`);
     return this._toJS(req);
   }
 
@@ -342,15 +353,23 @@ class Database {
     return this._toJSArray(data);
   }
 
-  // --- Dashboard data ---
+  // --- Dashboard data (optimized with parallel queries) ---
 
   async getDashboardData() {
-    const { data: materials } = await this.supabase.from('materials').select('*');
-    const activeCount = (materials || []).filter(m => m.status === 'ativo').length;
-    const balances = await this.getAllBalances();
+    // Run all independent queries in parallel
+    const [materialsRes, movementsRes, balances, recentMovements, recentRequisitions, allReqsRes, allItemsRes] = await Promise.all([
+      this.supabase.from('materials').select('*'),
+      this.supabase.from('movements').select('material_id, type, quantity'),
+      this.getAllBalances(),
+      this.getRecentMovements(8),
+      this.getRecentRequisitions(5),
+      this.supabase.from('requisitions').select('*'),
+      this.supabase.from('requisition_items').select('requisition_id, quantity')
+    ]);
+
+    const materials = materialsRes.data || [];
+    const activeCount = materials.filter(m => m.status === 'ativo').length;
     const belowMin = balances.filter(b => b.status === 'ativo' && b.belowMin);
-    const movements = await this.getRecentMovements(8);
-    const requisitions = await this.getRecentRequisitions(5);
 
     // Stock by category
     const categoryMap = {};
@@ -361,24 +380,31 @@ class Database {
       categoryMap[cat] += b.balance;
     }
 
-    // Consumption by destination
-    const { data: allReqs } = await this.supabase.from('requisitions').select('*');
-    const deliveredReqs = (allReqs || []).filter(r => r.status === 'entregue');
+    // Consumption by destination (single query, no N+1)
+    const allReqs = allReqsRes.data || [];
+    const allItems = allItemsRes.data || [];
+    const deliveredReqs = allReqs.filter(r => r.status === 'entregue');
+    const deliveredIds = new Set(deliveredReqs.map(r => r.id));
     const destMap = {};
+
+    // Pre-group items by requisition_id
+    const itemsByReq = {};
+    for (const it of allItems) {
+      if (!deliveredIds.has(it.requisition_id)) continue;
+      if (!itemsByReq[it.requisition_id]) itemsByReq[it.requisition_id] = 0;
+      itemsByReq[it.requisition_id] += Number(it.quantity);
+    }
     for (const req of deliveredReqs) {
-      const { data: items } = await this.supabase.from('requisition_items').select('quantity').eq('requisition_id', req.id);
-      let totalQty = 0;
-      for (const it of (items || [])) totalQty += Number(it.quantity);
       const dest = req.destination || 'Sem destino';
       if (!destMap[dest]) destMap[dest] = 0;
-      destMap[dest] += totalQty;
+      destMap[dest] += itemsByReq[req.id] || 0;
     }
 
     const totalItems = balances
       .filter(b => b.status === 'ativo')
       .reduce((sum, b) => sum + b.balance, 0);
 
-    const pendingReqs = (allReqs || []).filter(r => r.status === 'pendente').length;
+    const pendingReqs = allReqs.filter(r => r.status === 'pendente').length;
 
     return {
       totalMaterials: activeCount,
@@ -386,24 +412,25 @@ class Database {
       belowMinCount: belowMin.length,
       pendingReqs,
       belowMin,
-      recentMovements: movements,
-      recentRequisitions: requisitions,
+      recentMovements,
+      recentRequisitions,
       stockByCategory: categoryMap,
       consumptionByDest: destMap
     };
   }
 
-  // --- Audit log ---
+  // --- Audit log (fire-and-forget for performance) ---
 
-  async addAuditLog(action, entity, entityId, details) {
-    const { error } = await this.supabase.from('audit_log').insert({
+  addAuditLog(action, entity, entityId, details) {
+    // Fire-and-forget: don't await, don't block the caller
+    this.supabase.from('audit_log').insert({
       action,
       entity,
       entity_id: entityId,
       details
+    }).then(({ error }) => {
+      if (error) console.warn('Audit log error:', error.message);
     });
-    // Don't throw on audit log errors to avoid breaking main operations
-    if (error) console.warn('Audit log error:', error.message);
   }
 
   async getAuditLog(limit = 50) {
@@ -423,7 +450,7 @@ class Database {
     if (!trimmed) throw new Error('Nome da categoria é obrigatório');
     const { data, error } = await this.supabase.from('categories').insert({ name: trimmed }).select().single();
     if (error) throw new Error(error.message);
-    await this.addAuditLog('CREATE', 'category', data.id, `Categoria "${trimmed}" criada`);
+    this.addAuditLog('CREATE', 'category', data.id, `Categoria "${trimmed}" criada`);
     return data.id;
   }
 
@@ -432,14 +459,14 @@ class Database {
     if (!trimmed) throw new Error('Nome da categoria é obrigatório');
     const { error } = await this.supabase.from('categories').update({ name: trimmed, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) throw new Error(error.message);
-    await this.addAuditLog('UPDATE', 'category', id, `Categoria atualizada para "${trimmed}"`);
+    this.addAuditLog('UPDATE', 'category', id, `Categoria atualizada para "${trimmed}"`);
   }
 
   async deleteCategory(id) {
     const { data: cat } = await this.supabase.from('categories').select('name').eq('id', id).single();
     const { error } = await this.supabase.from('categories').delete().eq('id', id);
     if (error) throw new Error(error.message);
-    await this.addAuditLog('DELETE', 'category', id, `Categoria "${cat?.name}" removida`);
+    this.addAuditLog('DELETE', 'category', id, `Categoria "${cat?.name}" removida`);
   }
 
   async getAllCategories() {
@@ -463,7 +490,7 @@ class Database {
       abbreviation: abbreviation.trim()
     }).select().single();
     if (error) throw new Error(error.message);
-    await this.addAuditLog('CREATE', 'unit', data.id, `Unidade "${trimmed}" criada`);
+    this.addAuditLog('CREATE', 'unit', data.id, `Unidade "${trimmed}" criada`);
     return data.id;
   }
 
@@ -476,14 +503,14 @@ class Database {
       updated_at: new Date().toISOString()
     }).eq('id', id);
     if (error) throw new Error(error.message);
-    await this.addAuditLog('UPDATE', 'unit', id, `Unidade atualizada para "${trimmed}"`);
+    this.addAuditLog('UPDATE', 'unit', id, `Unidade atualizada para "${trimmed}"`);
   }
 
   async deleteUnit(id) {
     const { data: unit } = await this.supabase.from('units').select('name').eq('id', id).single();
     const { error } = await this.supabase.from('units').delete().eq('id', id);
     if (error) throw new Error(error.message);
-    await this.addAuditLog('DELETE', 'unit', id, `Unidade "${unit?.name}" removida`);
+    this.addAuditLog('DELETE', 'unit', id, `Unidade "${unit?.name}" removida`);
   }
 
   async getAllUnits() {
