@@ -26,6 +26,7 @@ class Database {
     if ('updated_at' in obj) { obj.updatedAt = obj.updated_at; delete obj.updated_at; }
     if ('requisition_id' in obj) { obj.requisitionId = obj.requisition_id; delete obj.requisition_id; }
     if ('entity_id' in obj) { obj.entityId = obj.entity_id; delete obj.entity_id; }
+    if ('image_url' in obj) { obj.imageUrl = obj.image_url; delete obj.image_url; }
     return obj;
   }
 
@@ -39,6 +40,7 @@ class Database {
     if ('updatedAt' in row) { row.updated_at = row.updatedAt; delete row.updatedAt; }
     if ('requisitionId' in row) { row.requisition_id = row.requisitionId; delete row.requisitionId; }
     if ('entityId' in row) { row.entity_id = row.entityId; delete row.entityId; }
+    if ('imageUrl' in row) { row.image_url = row.imageUrl; delete row.imageUrl; }
     return row;
   }
 
@@ -57,7 +59,8 @@ class Database {
       min_stock: material.minStock || 0,
       location: material.location || '',
       notes: material.notes || '',
-      status: material.status || 'ativo'
+      status: material.status || 'ativo',
+      image_url: material.imageUrl || null
     };
     const { data, error } = await this.supabase.from('materials').insert(row).select().single();
     if (error) throw new Error(error.message);
@@ -76,6 +79,7 @@ class Database {
       location: material.location || '',
       notes: material.notes || '',
       status: material.status || 'ativo',
+      image_url: material.imageUrl || null,
       updated_at: new Date().toISOString()
     };
     const { error } = await this.supabase.from('materials').update(row).eq('id', material.id);
@@ -142,6 +146,36 @@ class Database {
     if (error) throw new Error(error.message);
     const cats = [...new Set(data.map(d => d.category).filter(Boolean))];
     return cats.sort();
+  }
+
+  // --- Photo Upload Helper ---
+  async uploadMaterialPhoto(file) {
+    if (!file) return null;
+    try {
+      // Create a unique file name to avoid collisions
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
+      const filePath = `photos/${fileName}`;
+
+      const { error: uploadError } = await this.supabase.storage
+        .from('material-photos')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL and append a timestamp to bust cache
+      const { data } = this.supabase.storage
+        .from('material-photos')
+        .getPublicUrl(filePath);
+
+      return `${data.publicUrl}?t=${Date.now()}`;
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      throw new Error('Erro ao fazer upload da foto. Verifique se o bucket "material-photos" foi criado e está público.');
+    }
   }
 
   // --- Stock movement methods ---

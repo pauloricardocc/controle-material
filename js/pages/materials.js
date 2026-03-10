@@ -46,6 +46,7 @@ const MaterialsPage = {
               <table>
                 <thead>
                   <tr>
+                    <th>Foto</th>
                     <th>Nome</th>
                     <th>Código</th>
                     <th>Categoria</th>
@@ -57,7 +58,7 @@ const MaterialsPage = {
                   </tr>
                 </thead>
                 <tbody id="materialsTableBody">
-                  <tr><td colspan="8"><div class="spinner"></div></td></tr>
+                  <tr><td colspan="9"><div class="spinner"></div></td></tr>
                 </tbody>
               </table>
             </div>
@@ -96,12 +97,22 @@ const MaterialsPage = {
     );
 
     if (materials.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8">${renderEmpty('Nenhum material encontrado', 'Clique em "Novo Material" para cadastrar')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9">${renderEmpty('Nenhum material encontrado', 'Clique em "Novo Material" para cadastrar')}</td></tr>`;
       return;
     }
 
     tbody.innerHTML = materials.map(m => `
       <tr>
+        <td>
+          ${m.imageUrl
+        ? `<img src="${m.imageUrl}" alt="Foto" class="material-thumbnail">`
+        : `<div class="material-thumbnail-placeholder">
+                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                 </svg>
+               </div>`
+      }
+        </td>
         <td><strong>${escapeHTML(m.name)}</strong></td>
         <td><code style="background:var(--gray-100);padding:2px 8px;border-radius:4px;font-size:0.82rem;">${escapeHTML(m.code)}</code></td>
         <td>${escapeHTML(m.category || '-')}</td>
@@ -190,6 +201,26 @@ const MaterialsPage = {
       <form id="materialForm">
         <div class="form-row">
           <div class="form-group">
+            <label for="matPhoto">Foto do Material</label>
+            <div class="material-photo-container">
+              <div class="material-photo-preview" id="matPhotoPreview">
+                ${material?.imageUrl
+        ? `<img src="${material.imageUrl}" alt="Preview">`
+        : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                     </svg>
+                     <span>Sem foto</span>`
+      }
+              </div>
+              <div style="flex:1;">
+                <input type="file" class="form-control" id="matPhoto" accept="image/png, image/jpeg, image/webp" style="font-size: 0.82rem;">
+                <small style="color: var(--gray-500); display: block; margin-top: 4px;">PNG, JPG ou WEBP (opcional)</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
             <label for="matName">Nome do Material *</label>
             <input type="text" class="form-control" id="matName" required
               value="${escapeHTML(material?.name || '')}" placeholder="Ex: Cimento CP-II">
@@ -243,6 +274,26 @@ const MaterialsPage = {
 
     showModal(title, formHTML);
 
+    // Photo preview logic
+    document.getElementById('matPhoto').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      const preview = document.getElementById('matPhotoPreview');
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          preview.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+        };
+        reader.readAsDataURL(file);
+      } else {
+        preview.innerHTML = material?.imageUrl
+          ? `<img src="${material.imageUrl}" alt="Preview">`
+          : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+               <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+             </svg>
+             <span>Sem foto</span>`;
+      }
+    });
+
     document.getElementById('btnCancelMat').addEventListener('click', closeModal);
 
     document.getElementById('materialForm').addEventListener('submit', async (e) => {
@@ -263,19 +314,37 @@ const MaterialsPage = {
           return;
         }
 
-        if (isEdit) {
-          data.id = material.id;
-          data.status = material.status;
-          data.createdAt = material.createdAt;
-          await db.updateMaterial(data);
-          showToast('Material atualizado com sucesso!');
-        } else {
-          await db.addMaterial(data);
-          showToast('Material cadastrado com sucesso!');
-        }
+        const submitBtn = document.querySelector('#materialForm button[type="submit"]');
+        const originalBtnText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<div class="spinner spinner-sm" style="border-color: #fff; border-top-color: transparent;"></div> Salvando...';
+        submitBtn.disabled = true;
 
-        closeModal();
-        this._loadTable();
+        try {
+          // Handle photo upload first
+          const photoInput = document.getElementById('matPhoto');
+          if (photoInput.files.length > 0) {
+            data.imageUrl = await db.uploadMaterialPhoto(photoInput.files[0]);
+          } else if (isEdit) {
+            data.imageUrl = material.imageUrl; // Keep existing image if no new one selected
+          }
+
+          if (isEdit) {
+            data.id = material.id;
+            data.status = material.status;
+            data.createdAt = material.createdAt;
+            await db.updateMaterial(data);
+            showToast('Material atualizado com sucesso!');
+          } else {
+            await db.addMaterial(data);
+            showToast('Material cadastrado com sucesso!');
+          }
+
+          closeModal();
+          this._loadTable();
+        } finally {
+          submitBtn.innerHTML = originalBtnText;
+          submitBtn.disabled = false;
+        }
       } catch (err) {
         showToast(err.message || 'Erro ao salvar material', 'error');
       }
