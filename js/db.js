@@ -249,6 +249,15 @@ class Database {
 
   // --- Requisition methods ---
 
+  async getAllRequisitions() {
+    const { data, error } = await this.supabase
+      .from('requisitions')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return this._toJSArray(data);
+  }
+
   async getNextRequisitionNumber() {
     const { data, error } = await this.supabase.from('requisitions').select('number').order('id', { ascending: false }).limit(1);
     if (error) throw new Error(error.message);

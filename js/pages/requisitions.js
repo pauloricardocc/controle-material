@@ -69,7 +69,7 @@ const RequisitionsPage = {
     const tbody = document.getElementById('reqTableBody');
     const statusFilter = document.querySelector('#reqStatusFilter .filter-pill.active')?.dataset.status || '';
 
-    let requisitions = await db.getAll('requisitions');
+    let requisitions = await db.getAllRequisitions();
     requisitions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     if (statusFilter) {
@@ -172,7 +172,7 @@ const RequisitionsPage = {
   },
 
   async _showCreateForm() {
-    const materials = (await db.getAll('materials')).filter(m => m.status === 'ativo');
+    const materials = await db.getActiveMaterials();
 
     if (materials.length === 0) {
       showToast('Cadastre materiais antes de criar requisições', 'warning');
