@@ -14,6 +14,36 @@ class Database {
 
   async init() {
     this.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Test connectivity with a lightweight query
+    try {
+      await this._withRetry(() => this.supabase.from('materials').select('id').limit(1));
+    } catch (e) {
+      throw new Error('Não foi possível conectar ao servidor. Verifique sua conexão ou se o projeto Supabase está ativo.');
+    }
+  }
+
+  /**
+   * Retry wrapper for Supabase calls that may fail due to network issues.
+   * Retries up to 3 times with exponential backoff (500ms, 1s, 2s).
+   */
+  async _withRetry(fn, maxRetries = 3) {
+    let lastError;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const result = await fn();
+        if (result.error) {
+          // Supabase returned an error object (not a network failure)
+          return result;
+        }
+        return result;
+      } catch (err) {
+        lastError = err;
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+        }
+      }
+    }
+    throw lastError;
   }
 
   // --- Helper: convert DB row keys (snake_case) to JS keys (camelCase) ---
@@ -518,6 +548,12 @@ class Database {
     return this._toJSArray(data);
   }
 
+  async getCategory(id) {
+    const { data, error } = await this.supabase.from('categories').select('*').eq('id', id).single();
+    if (error) throw new Error(error.message);
+    return this._toJS(data);
+  }
+
   async getCategoryNames() {
     const cats = await this.getAllCategories();
     return cats.map(c => c.name);
@@ -560,6 +596,12 @@ class Database {
     const { data, error } = await this.supabase.from('units').select('*').order('name');
     if (error) throw new Error(error.message);
     return this._toJSArray(data);
+  }
+
+  async getUnit(id) {
+    const { data, error } = await this.supabase.from('units').select('*').eq('id', id).single();
+    if (error) throw new Error(error.message);
+    return this._toJS(data);
   }
 
   async getUnitNames() {

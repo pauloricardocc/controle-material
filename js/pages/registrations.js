@@ -5,6 +5,9 @@
 const CategoriesPage = {
     async render() {
         const content = document.getElementById('contentArea');
+        content.innerHTML = '<div class="spinner"></div>';
+
+        try {
         content.innerHTML = `
       <div class="fade-in">
         <div class="action-bar">
@@ -61,6 +64,17 @@ const CategoriesPage = {
         });
 
         await this._loadTable();
+        } catch (err) {
+            content.innerHTML = `
+              <div class="empty-state">
+                <h4>Erro ao carregar painel</h4>
+                <p>${err.message || err}</p>
+                <button class="btn btn-primary" onclick="CategoriesPage.render()" style="margin-top: 12px;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  Tentar Novamente
+                </button>
+              </div>`;
+        }
     },
 
     async _loadTable() {
@@ -103,7 +117,7 @@ const CategoriesPage = {
 
         tbody.querySelectorAll('.btn-edit-cat').forEach(btn => {
             btn.addEventListener('click', async () => {
-                const cat = await db.get('categories', Number(btn.dataset.id));
+                const cat = await db.getCategory(Number(btn.dataset.id));
                 this._showForm(cat);
             });
         });
@@ -171,6 +185,9 @@ const CategoriesPage = {
 const UnitsPage = {
     async render() {
         const content = document.getElementById('contentArea');
+        content.innerHTML = '<div class="spinner"></div>';
+
+        try {
         content.innerHTML = `
       <div class="fade-in">
         <div class="action-bar">
@@ -228,6 +245,17 @@ const UnitsPage = {
         });
 
         await this._loadTable();
+        } catch (err) {
+            content.innerHTML = `
+              <div class="empty-state">
+                <h4>Erro ao carregar painel</h4>
+                <p>${err.message || err}</p>
+                <button class="btn btn-primary" onclick="UnitsPage.render()" style="margin-top: 12px;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  Tentar Novamente
+                </button>
+              </div>`;
+        }
     },
 
     async _loadTable() {
@@ -271,7 +299,7 @@ const UnitsPage = {
 
         tbody.querySelectorAll('.btn-edit-unit').forEach(btn => {
             btn.addEventListener('click', async () => {
-                const unit = await db.get('units', Number(btn.dataset.id));
+                const unit = await db.getUnit(Number(btn.dataset.id));
                 this._showForm(unit);
             });
         });

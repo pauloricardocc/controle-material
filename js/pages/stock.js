@@ -7,6 +7,7 @@ const StockPage = {
     const content = document.getElementById('contentArea');
     content.innerHTML = '<div class="spinner"></div>';
 
+    try {
     const activeMaterials = await db.getActiveMaterials();
 
     content.innerHTML = `
@@ -120,6 +121,17 @@ const StockPage = {
 
     await this._loadBalances();
     await this._loadMovements();
+    } catch (err) {
+      content.innerHTML = `
+        <div class="empty-state">
+          <h4>Erro ao carregar painel</h4>
+          <p>${err.message || err}</p>
+          <button class="btn btn-primary" onclick="StockPage.render()" style="margin-top: 12px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Tentar Novamente
+          </button>
+        </div>`;
+    }
   },
 
   async _loadBalances() {
