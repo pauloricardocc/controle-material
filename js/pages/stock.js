@@ -28,6 +28,14 @@ const StockPage = {
             </div>
           </div>
           <div class="action-bar-right">
+            <button class="btn btn-outline btn-lg" id="btnPrintStock">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 6 2 18 2 18 9"/>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+              </svg>
+              Imprimir Estoque
+            </button>
             <button class="btn btn-success btn-lg" id="btnStockEntry">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -60,7 +68,7 @@ const StockPage = {
                     <th>Saldo Atual</th>
                     <th>Estoque Mín.</th>
                     <th>Local</th>
-                    <th style="width: 100px;">Ações</th>
+                    <th style="width: 130px;">Ações</th>
                   </tr>
                 </thead>
                 <tbody id="stockTableBody">
@@ -117,6 +125,10 @@ const StockPage = {
 
     document.getElementById('btnStockExit').addEventListener('click', () => {
       this._showMovementForm('saida', activeMaterials);
+    });
+
+    document.getElementById('btnPrintStock').addEventListener('click', () => {
+      this._printStock();
     });
 
     await this._loadBalances();
@@ -181,12 +193,17 @@ const StockPage = {
                 <line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
             </button>
+            <button class="btn btn-ghost btn-icon btn-stock-adjust" data-id="${b.id}" data-name="${escapeHTML(b.name)}" data-unit="${escapeHTML(b.unit)}" data-balance="${b.balance}" title="Ajustar por contagem física">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" stroke-width="2">
+                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+            </button>
           </div>
         </td>
       </tr>
     `).join('');
 
-    // Quick entry/exit handlers
+    // Quick entry/exit/adjust handlers
     tbody.querySelectorAll('.btn-stock-entry').forEach(btn => {
       btn.addEventListener('click', () => {
         this._showQuickMovement('entrada', Number(btn.dataset.id), btn.dataset.name, btn.dataset.unit);
@@ -196,6 +213,12 @@ const StockPage = {
     tbody.querySelectorAll('.btn-stock-exit').forEach(btn => {
       btn.addEventListener('click', () => {
         this._showQuickMovement('saida', Number(btn.dataset.id), btn.dataset.name, btn.dataset.unit, Number(btn.dataset.balance));
+      });
+    });
+
+    tbody.querySelectorAll('.btn-stock-adjust').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._showAdjustForm(Number(btn.dataset.id), btn.dataset.name, btn.dataset.unit, Number(btn.dataset.balance));
       });
     });
   },
@@ -372,5 +395,149 @@ const StockPage = {
         showToast(err.message || 'Erro ao registrar movimentação', 'error');
       }
     });
+  },
+
+  _showAdjustForm(materialId, materialName, materialUnit, currentBalance) {
+    const formHTML = `
+      <form id="adjustForm">
+        <div style="padding: 10px 14px; background: var(--gray-50); border-radius: var(--border-radius-md); font-size: 0.85rem; margin-bottom: 16px;">
+          <strong>${escapeHTML(materialName)}</strong>
+          · Saldo no sistema: <strong>${currentBalance} ${escapeHTML(materialUnit)}</strong>
+        </div>
+        <div class="form-group">
+          <label for="adjustQty">Quantidade contada fisicamente (${escapeHTML(materialUnit)}) *</label>
+          <input type="number" class="form-control" id="adjustQty" required min="0" placeholder="0" autofocus>
+        </div>
+        <div class="form-group">
+          <label for="adjustNotes">Observação</label>
+          <textarea class="form-control" id="adjustNotes" rows="2" placeholder="Observação opcional..."></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" id="btnCancelAdjust">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-lg">Aplicar Ajuste</button>
+        </div>
+      </form>
+    `;
+
+    showModal(`Ajustar Estoque - ${materialName}`, formHTML);
+
+    document.getElementById('btnCancelAdjust').addEventListener('click', closeModal);
+
+    document.getElementById('adjustForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const countedQty = Number(document.getElementById('adjustQty').value);
+        const notes = document.getElementById('adjustNotes').value.trim();
+
+        if (countedQty === '' || countedQty < 0 || Number.isNaN(countedQty)) {
+          showToast('Digite uma quantidade válida', 'error');
+          return;
+        }
+
+        const diff = await db.adjustStock(materialId, countedQty, notes);
+
+        if (diff === 0) {
+          showToast('Nenhum ajuste necessário — saldo já confere.');
+        } else {
+          showToast(`Ajuste aplicado: ${diff > 0 ? '+' : ''}${diff} ${materialUnit}`);
+        }
+
+        closeModal();
+        await this._loadBalances();
+        await this._loadMovements();
+      } catch (err) {
+        showToast(err.message || 'Erro ao ajustar estoque', 'error');
+      }
+    });
+  },
+
+  async _printStock() {
+    let balances = await db.getAllBalances();
+    balances = balances.filter(b => b.status === 'ativo');
+
+    if (balances.length === 0) {
+      showToast('Nenhum material ativo para imprimir', 'warning');
+      return;
+    }
+
+    // Group by category, sorted alphabetically (categories and materials within)
+    const groups = {};
+    for (const b of balances) {
+      const cat = b.category || 'Sem categoria';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(b);
+    }
+    const sortedCategories = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    for (const cat of sortedCategories) {
+      groups[cat].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    }
+
+    const printArea = document.getElementById('printArea');
+
+    const rows = sortedCategories.map(cat => `
+      <tr class="print-category-row">
+        <td colspan="7">${escapeHTML(cat)}</td>
+      </tr>
+      ${groups[cat].map(b => `
+        <tr>
+          <td>${escapeHTML(b.code)}</td>
+          <td>${escapeHTML(b.name)}</td>
+          <td>${escapeHTML(b.location || '-')}</td>
+          <td>${escapeHTML(b.unit)}</td>
+          <td style="text-align:center;">${b.balance}</td>
+          <td class="print-blank-cell"></td>
+          <td class="print-blank-cell"></td>
+        </tr>
+      `).join('')}
+    `).join('');
+
+    printArea.innerHTML = `
+      <div class="print-header">
+        <h1>CONTAGEM DE ESTOQUE FÍSICO</h1>
+        <p>Controle Interno de Materiais e Estoque</p>
+      </div>
+
+      <div class="print-info">
+        <div>
+          <div class="print-info-item"><strong>Data:</strong> ${formatDateFull(new Date().toISOString())}</div>
+          <div class="print-info-item"><strong>Total de itens:</strong> ${balances.length}</div>
+        </div>
+        <div>
+          <div class="print-info-item"><strong>Contado por:</strong> _______________________</div>
+        </div>
+      </div>
+
+      <table class="print-table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Material</th>
+            <th>Local</th>
+            <th>Unidade</th>
+            <th style="text-align:center;">Saldo Sistema</th>
+            <th>Contagem Física</th>
+            <th>Observação</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+
+      <div class="print-signatures">
+        <div class="print-signature-block">
+          <div class="print-signature-line">Contado por</div>
+        </div>
+        <div class="print-signature-block">
+          <div class="print-signature-line">Conferido por</div>
+        </div>
+      </div>
+
+      <div class="print-footer">
+        Documento gerado em ${formatDateFull(new Date().toISOString())} · Sistema de Controle de Materiais
+      </div>
+    `;
+
+    window.print();
   }
 };

@@ -277,7 +277,31 @@ class Database {
     const material = await this._getMaterial(materialId);
     this.addAuditLog('STOCK_EXIT', 'movement', data.id,
       `Saída de ${quantity} ${material?.unit || 'un'} - ${material?.name || 'ID:' + materialId}`);
+
+    // Estoque mínimo baixa junto com a saída (nunca abaixo de 0)
+    if (material) {
+      const newMinStock = Math.max(0, Number(material.min_stock || 0) - Number(quantity));
+      const { error: minStockError } = await this.supabase.from('materials')
+        .update({ min_stock: newMinStock, updated_at: new Date().toISOString() })
+        .eq('id', materialId);
+      if (minStockError) throw new Error(minStockError.message);
+    }
+
     return data.id;
+  }
+
+  // Reconcile system balance with a physical count, creating an entry/exit for the difference
+  async adjustStock(materialId, countedQuantity, notes = '') {
+    const currentBalance = await this.getStockBalance(materialId);
+    const diff = Number(countedQuantity) - currentBalance;
+    if (diff === 0) return 0;
+    const adjNotes = notes ? `Ajuste de contagem física - ${notes}` : 'Ajuste de contagem física';
+    if (diff > 0) {
+      await this.addStockEntry(materialId, diff, adjNotes);
+    } else {
+      await this.addStockExit(materialId, Math.abs(diff), adjNotes);
+    }
+    return diff;
   }
 
   async getRecentMovements(limit = 10) {

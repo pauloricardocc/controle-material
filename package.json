@@ -1,0 +1,9 @@
+{
+  "name": "controle-material",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema de Controle de Materiais e Estoque",
+  "scripts": {
+    "dev": "node dev-server.js"
+  }
+}
