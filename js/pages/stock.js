@@ -510,13 +510,13 @@ const StockPage = {
       <table class="print-table">
         <thead>
           <tr>
-            <th>Código</th>
-            <th>Material</th>
-            <th>Local</th>
-            <th>Unidade</th>
-            <th style="text-align:center;">Saldo Sistema</th>
-            <th>Contagem Física</th>
-            <th>Observação</th>
+            <th style="width: 10%;">Código</th>
+            <th style="width: 26%;">Material</th>
+            <th style="width: 12%;">Local</th>
+            <th style="width: 10%;">Unidade</th>
+            <th style="width: 12%; text-align:center;">Saldo Sistema</th>
+            <th style="width: 15%;">Contagem Física</th>
+            <th style="width: 15%;">Observação</th>
           </tr>
         </thead>
         <tbody>
